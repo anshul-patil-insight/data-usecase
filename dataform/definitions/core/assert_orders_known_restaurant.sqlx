@@ -1,0 +1,15 @@
+-- Explicit referential-integrity assertion (business rule 4): every order in
+-- fct_orders must point at a restaurant that exists in dim_restaurants. This
+-- is already structurally guaranteed by the INNER JOIN in fct_orders, but we
+-- assert it directly too so a future refactor can't silently reintroduce
+-- orphaned orders without failing the Dataform run.
+config {
+  type: "assertion",
+  description: "fct_orders must never contain a restaurant_id that is missing from dim_restaurants.",
+}
+
+select o.order_id, o.restaurant_id
+from ${ref("fct_orders")} o
+left join ${ref("dim_restaurants")} r
+  on o.restaurant_id = r.restaurant_id
+where r.restaurant_id is null

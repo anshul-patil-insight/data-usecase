@@ -1,0 +1,26 @@
+-- rejected_orders (business rule 4): orders that must never reach fct_orders,
+-- kept with a reason so the business can follow up. Upserted by order_id so
+-- the reason always reflects today's latest check (and a reason is updated
+-- if it changes, e.g. from "missing_customer_id" to "unknown_restaurant").
+config {
+  type: "incremental",
+  uniqueKey: ["order_id"],
+  description: "Orders excluded from fct_orders: unknown restaurant_id or missing customer_id.",
+}
+
+select
+  o.order_id,
+  o.customer_id,
+  o.restaurant_id,
+  o.order_date,
+  o.status,
+  case
+    when o.customer_id is null then 'missing_customer_id'
+    when r.restaurant_id is null then 'unknown_restaurant_id'
+  end as reason,
+  current_timestamp() as rejected_at
+from ${ref("stg_orders")} o
+left join ${ref("dim_restaurants")} r
+  on o.restaurant_id = r.restaurant_id
+where o._source_date = date('${dataform.projectConfig.vars.run_date}')
+  and (o.customer_id is null or r.restaurant_id is null)

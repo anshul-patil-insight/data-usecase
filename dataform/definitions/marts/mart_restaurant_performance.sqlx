@@ -1,0 +1,47 @@
+-- mart_restaurant_performance: one row per restaurant - including restaurants
+-- with zero orders (left join from dim_restaurants, rule: "every restaurant,
+-- even one with no orders"). total_orders = all VALID orders regardless of
+-- status (fct_orders already excludes invalid orders per rule 4).
+config {
+  type: "table",
+  schema: dataform.projectConfig.vars.marts_dataset,
+  description: "Per-restaurant order volume, cancellation rate and delivered revenue.",
+}
+
+with order_stats as (
+  select
+    restaurant_id,
+    count(*) as total_orders,
+    countif(status = 'delivered') as delivered_orders,
+    countif(status = 'cancelled') as cancelled_orders
+  from ${ref("fct_orders")}
+  group by restaurant_id
+),
+
+revenue_stats as (
+  select
+    o.restaurant_id,
+    coalesce(sum(i.line_amount), 0) as gross_revenue
+  from ${ref("fct_orders")} o
+  left join ${ref("fct_order_items")} i
+    on i.order_id = o.order_id
+  where o.status = 'delivered'
+  group by o.restaurant_id
+)
+
+select
+  r.restaurant_id,
+  r.restaurant_name,
+  r.city,
+  r.is_active,
+  coalesce(os.total_orders, 0) as total_orders,
+  coalesce(os.delivered_orders, 0) as delivered_orders,
+  coalesce(os.cancelled_orders, 0) as cancelled_orders,
+  round(
+    safe_divide(coalesce(os.cancelled_orders, 0), nullif(coalesce(os.total_orders, 0), 0)) * 100,
+    2
+  ) as cancellation_rate_pct,
+  coalesce(rs.gross_revenue, 0) as gross_revenue
+from ${ref("dim_restaurants")} r
+left join order_stats os on os.restaurant_id = r.restaurant_id
+left join revenue_stats rs on rs.restaurant_id = r.restaurant_id

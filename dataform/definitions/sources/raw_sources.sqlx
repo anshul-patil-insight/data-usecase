@@ -1,0 +1,28 @@
+// Raw tables are loaded directly by Airflow (GCSToBigQueryOperator + a
+// DELETE/INSERT merge keyed on _source_date). Dataform never writes to raw -
+// it only declares these as sources so staging models can depend on them in
+// the dependency graph / lineage.
+
+declare({
+  schema: dataform.projectConfig.vars.raw_dataset,
+  name: "restaurants",
+  description: "Raw restaurants CSV rows, one partition per _source_date. Full snapshot every day.",
+});
+
+declare({
+  schema: dataform.projectConfig.vars.raw_dataset,
+  name: "customers",
+  description: "Raw customers CSV rows. Day 0 = full list, later days = changed/new customers only.",
+});
+
+declare({
+  schema: dataform.projectConfig.vars.raw_dataset,
+  name: "orders",
+  description: "Raw orders CSV rows. Day 0 = full history since 2026-09-10, later days = new/changed orders only. An order can appear in multiple files/days.",
+});
+
+declare({
+  schema: dataform.projectConfig.vars.raw_dataset,
+  name: "order_items",
+  description: "Raw order_items CSV rows. Items only arrive once, with the order that introduced them, and never change.",
+});

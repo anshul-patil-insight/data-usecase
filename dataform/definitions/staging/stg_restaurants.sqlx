@@ -1,0 +1,44 @@
+-- Restaurants: "the latest snapshot is the truth" (business rule 3). Each
+-- day's file is a FULL snapshot, so we don't merge across days - we just take
+-- the most recent snapshot available as of this run's date and dedupe
+-- defensively on restaurant_id (in case the export ever contained an
+-- accidental duplicate row within a single snapshot).
+config {
+  type: "view",
+  description: "Latest full restaurant snapshot as of ${dataform.projectConfig.vars.run_date}, standardised.",
+}
+
+with latest_snapshot_date as (
+  select max(_source_date) as snapshot_date
+  from ${ref("restaurants")}
+  where _source_date <= date('${dataform.projectConfig.vars.run_date}')
+),
+
+ranked as (
+  select
+    r.*,
+    row_number() over (
+      partition by r.restaurant_id
+      order by r._loaded_at desc
+    ) as rn
+  from ${ref("restaurants")} r
+  cross join latest_snapshot_date s
+  where r._source_date = s.snapshot_date
+    and r.restaurant_id is not null
+)
+
+select
+  restaurant_id,
+  trim(name) as restaurant_name,
+  trim(city) as city,
+  trim(cuisine) as cuisine,
+  -- is_active arrives as text ("true"/"false"/"1"/"0"/etc.) - normalise to BOOL,
+  -- defaulting unparseable values to TRUE so we never silently hide a restaurant.
+  coalesce(safe_cast(lower(trim(is_active)) as bool),
+           lower(trim(is_active)) in ('1', 'yes', 'y'),
+           true) as is_active,
+  safe_cast(onboarded_date as date) as onboarded_date,
+  _source_date,
+  _loaded_at
+from ranked
+where rn = 1

@@ -1,0 +1,24 @@
+-- mart_daily_city_revenue: one row per order_date x city (restaurant's city).
+-- Revenue = sum(quantity * unit_price) over VALID item lines (rule 6),
+-- counted only for orders whose CURRENT status is 'delivered'. Rebuilt in
+-- full each run (table) - it's a small aggregate over fct_orders, cheap to
+-- recompute and guarantees consistency if any upstream row's current status
+-- changes retroactively (e.g. a delivered order gets cancelled later).
+config {
+  type: "table",
+  schema: dataform.projectConfig.vars.marts_dataset,
+  description: "Delivered-order revenue per order_date and restaurant city.",
+}
+
+select
+  o.order_date,
+  r.city,
+  count(distinct o.order_id) as delivered_orders,
+  coalesce(sum(i.line_amount), 0) as gross_revenue
+from ${ref("fct_orders")} o
+inner join ${ref("dim_restaurants")} r
+  on o.restaurant_id = r.restaurant_id
+left join ${ref("fct_order_items")} i
+  on i.order_id = o.order_id
+where o.status = 'delivered'
+group by o.order_date, r.city

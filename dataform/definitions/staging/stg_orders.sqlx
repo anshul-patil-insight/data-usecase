@@ -1,0 +1,63 @@
+-- Orders: "current state wins" by updated_at (rule 1), statuses standardised
+-- to the canonical set (rule 2), order_date = calendar date of order_ts with
+-- no timezone conversion (rule 7), missing payment_method reported as
+-- 'unknown' (rule 8). We deliberately do NOT drop invalid orders here -
+-- restaurant/customer validation (rule 4) happens in core.fct_orders /
+-- core.rejected_orders, once we can check against dim_restaurants.
+config {
+  type: "view",
+  description: "One row per order_id: latest version by updated_at, statuses standardised, as of ${dataform.projectConfig.vars.run_date}.",
+}
+
+with typed as (
+  select
+    order_id,
+    customer_id,
+    restaurant_id,
+    -- order_ts arrives as plain text, no timezone info to convert - cast
+    -- straight to DATETIME and take the calendar date from that.
+    safe_cast(order_ts as datetime) as order_ts,
+    -- normalise free-text status variants (case/whitespace/separator noise
+    -- observed in the export) onto the exact 5 allowed values.
+    case
+      when regexp_replace(lower(trim(status)), r'[\s\-]+', '_') in ('placed', 'new', 'created') then 'placed'
+      when regexp_replace(lower(trim(status)), r'[\s\-]+', '_') in ('preparing', 'in_kitchen', 'cooking') then 'preparing'
+      when regexp_replace(lower(trim(status)), r'[\s\-]+', '_') in ('out_for_delivery', 'out_for_delivery_', 'dispatched', 'on_the_way') then 'out_for_delivery'
+      when regexp_replace(lower(trim(status)), r'[\s\-]+', '_') in ('delivered', 'complete', 'completed') then 'delivered'
+      when regexp_replace(lower(trim(status)), r'[\s\-]+', '_') in ('cancelled', 'canceled', 'cancel') then 'cancelled'
+      else null
+    end as status,
+    nullif(trim(payment_method), '') as payment_method_raw,
+    safe_cast(updated_at as timestamp) as updated_at,
+    _source_date,
+    _loaded_at
+  from ${ref("orders")}
+  where _source_date <= date('${dataform.projectConfig.vars.run_date}')
+    and order_id is not null
+),
+
+ranked as (
+  select
+    *,
+    row_number() over (
+      partition by order_id
+      order by updated_at desc nulls last, _loaded_at desc
+    ) as rn
+  from typed
+)
+
+select
+  order_id,
+  customer_id,
+  restaurant_id,
+  order_ts,
+  date(order_ts) as order_date,
+  status,
+  coalesce(lower(payment_method_raw), 'unknown') as payment_method,
+  updated_at,
+  -- source_date of the WINNING (latest) version - lets core.fct_orders /
+  -- core.rejected_orders filter to "orders whose current state changed
+  -- today" for the incremental merge.
+  _source_date
+from ranked
+where rn = 1

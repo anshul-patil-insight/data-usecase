@@ -1,0 +1,31 @@
+-- dim_customers: "upsert" strategy. Day 0 ships every customer; later days
+-- ship only new sign-ups / changed records, so a MERGE keyed on customer_id
+-- is the natural fit: insert first-time customers, overwrite existing ones
+-- with their current (latest updated_at) state (rule 1).
+--
+-- Incrementality: stg_customers already resolves "latest version across all
+-- history up to run_date" per customer_id. Filtering to
+-- `_source_date = run_date` keeps only the customers whose CURRENT state
+-- happens to have been produced today - i.e. exactly the customers this
+-- run's file(s) touched - so the generated MERGE only scans/writes a
+-- day's worth of rows, not the whole table.
+config {
+  type: "incremental",
+  uniqueKey: ["customer_id"],
+  description: "Customer dimension, upserted daily - current (latest updated_at) version of each customer.",
+  assertions: {
+    uniqueKey: ["customer_id"],
+    nonNull: ["customer_id"],
+  },
+}
+
+select
+  customer_id,
+  name,
+  email,
+  phone,
+  city,
+  signup_date,
+  updated_at
+from ${ref("stg_customers")}
+where _source_date = date('${dataform.projectConfig.vars.run_date}')

@@ -1,0 +1,50 @@
+-- fct_orders: the incremental fact table (business rule driving requirement
+-- "fct_orders must be incremental, not rebuilt from scratch every run").
+--
+-- Incrementality: stg_orders resolves "current state as of run_date" per
+-- order_id across the WHOLE history (so a status change arriving today on a
+-- week-old order is correctly reflected). We then restrict the rows we
+-- actually merge to `_source_date = run_date` - i.e. only orders whose
+-- current state was (re)produced by today's file - so each run's BigQuery
+-- job only touches today's changed/new orders, not the full table.
+--
+-- Validity (rule 4): an order is INVALID (and must never reach fct_orders)
+-- if its restaurant_id doesn't exist in dim_restaurants, or customer_id is
+-- null. Invalid orders are written to core.rejected_orders with a reason
+-- instead (see that file).
+config {
+  type: "incremental",
+  uniqueKey: ["order_id"],
+  description: "One row per order: current status, standardised, invalid orders excluded. Incremental merge on order_id.",
+  assertions: {
+    uniqueKey: ["order_id"],
+    nonNull: ["order_id", "customer_id", "restaurant_id", "order_date", "status"],
+  },
+  bigquery: {
+    partitionBy: "order_date",
+    clusterBy: ["restaurant_id", "status"],
+  },
+}
+
+select
+  o.order_id,
+  o.customer_id,
+  o.restaurant_id,
+  o.order_ts,
+  o.order_date,
+  o.status,
+  o.payment_method,
+  o.updated_at
+from ${ref("stg_orders")} o
+inner join ${ref("dim_restaurants")} r
+  on o.restaurant_id = r.restaurant_id
+where o.customer_id is not null
+  and o._source_date = date('${dataform.projectConfig.vars.run_date}')
+
+-- Once a previously-rejected order becomes valid (e.g. a late-arriving
+-- restaurant snapshot finally includes its restaurant_id), drop it from
+-- rejected_orders so the two tables never both claim the same order_id.
+post_operations {
+  delete from ${ref("rejected_orders")}
+  where order_id in (select order_id from ${self()})
+}

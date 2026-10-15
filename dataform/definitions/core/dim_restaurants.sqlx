@@ -1,0 +1,22 @@
+-- dim_restaurants: "replace" strategy. Restaurants are a FULL snapshot every
+-- day (not changes-only), so there is nothing to merge - we simply rebuild
+-- the dimension from the latest available snapshot each run. Rule 3: an
+-- inactive restaurant keeps its history, so we never delete rows here based
+-- on is_active; it's just a flag consumers filter/group on if they choose to.
+config {
+  type: "table",
+  description: "Restaurant dimension, rebuilt in full every run from the latest snapshot (replace strategy).",
+  assertions: {
+    uniqueKey: ["restaurant_id"],
+    nonNull: ["restaurant_id", "restaurant_name", "city"],
+  },
+}
+
+select
+  restaurant_id,
+  restaurant_name,
+  city,
+  cuisine,
+  is_active,
+  onboarded_date
+from ${ref("stg_restaurants")}

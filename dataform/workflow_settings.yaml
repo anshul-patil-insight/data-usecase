@@ -1,0 +1,15 @@
+defaultProject: sada-seed-2025-sandbox
+defaultLocation: US
+defaultDataset: seedhe_core
+defaultAssertionDataset: seedhe_core_assertions
+
+# `run_date` is overridden per Airflow run via
+# DataformCreateCompilationResultOperator(code_compilation_config.vars).
+# The default below only matters for manual/local `dataform run` invocations.
+vars:
+  run_date: "2026-10-13"
+  raw_dataset: seedhe_raw
+  core_dataset: seedhe_core
+  marts_dataset: seedhe_marts
+
+dataformCoreVersion: 3.0.0

@@ -1,0 +1,23 @@
+-- fct_order_items: "append" strategy - items never change once placed, so
+-- each run only ever introduces brand-new lines. We still key the merge on
+-- (order_id, line_no) rather than doing a raw INSERT so that re-running the
+-- same day is a safe no-op instead of duplicating lines.
+config {
+  type: "incremental",
+  uniqueKey: ["order_id", "line_no"],
+  description: "Valid order line items (invalid lines already excluded in staging), append-only by day.",
+  assertions: {
+    uniqueKey: ["order_id", "line_no"],
+    nonNull: ["order_id", "line_no"],
+  },
+}
+
+select
+  order_id,
+  line_no,
+  item_name,
+  quantity,
+  unit_price,
+  line_amount
+from ${ref("stg_order_items")}
+where _source_date = date('${dataform.projectConfig.vars.run_date}')

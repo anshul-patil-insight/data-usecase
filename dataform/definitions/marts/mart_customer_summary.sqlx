@@ -1,0 +1,43 @@
+-- mart_customer_summary: one row per customer - including customers with no
+-- orders (left join from dim_customers). Only delivered orders count towards
+-- spend / repeat-customer status (rule 6).
+config {
+  type: "table",
+  schema: dataform.projectConfig.vars.marts_dataset,
+  description: "Per-customer delivered-order history, spend and repeat-customer flag.",
+}
+
+with delivered_orders as (
+  select
+    o.customer_id,
+    o.order_id,
+    o.order_date,
+    coalesce(sum(i.line_amount), 0) as order_revenue
+  from ${ref("fct_orders")} o
+  left join ${ref("fct_order_items")} i
+    on i.order_id = o.order_id
+  where o.status = 'delivered'
+  group by o.customer_id, o.order_id, o.order_date
+),
+
+customer_stats as (
+  select
+    customer_id,
+    count(*) as delivered_orders,
+    sum(order_revenue) as total_spend,
+    min(order_date) as first_order_date,
+    max(order_date) as last_order_date
+  from delivered_orders
+  group by customer_id
+)
+
+select
+  c.customer_id,
+  c.city as current_city,
+  coalesce(cs.delivered_orders, 0) as delivered_orders,
+  coalesce(cs.total_spend, 0) as total_spend,
+  cs.first_order_date,
+  cs.last_order_date,
+  coalesce(cs.delivered_orders, 0) >= 2 as is_repeat_customer
+from ${ref("dim_customers")} c
+left join customer_stats cs on cs.customer_id = c.customer_id
